@@ -4,10 +4,15 @@ from flask import Flask, request, jsonify
 from whatsapp_service import send_message
 from intent_detection import detect_intent
 import database
+from reminder_engine import start_scheduler
 
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+# Initialize database and background schedulers on startup
+database.initialize_database()
+start_scheduler()
 
 def format_event(event):
     """Helps format individual event payloads into a readable, natural structure."""
