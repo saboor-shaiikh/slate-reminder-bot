@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration Variables
-# These should be set via environment variables in production
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 WHATSAPP_APP_TOKEN = os.getenv("WHATSAPP_APP_TOKEN")
 WHATSAPP_API_TOKEN = os.getenv("WHATSAPP_API_TOKEN")
