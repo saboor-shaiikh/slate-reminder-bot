@@ -57,3 +57,28 @@ def detect_intent(message_text: str) -> dict:
     except Exception as e:
         logger.error(f"Failed to detect intent properly: {e}")
         return {"intent": "error"}
+def generate_quote() -> str:
+    """
+    Generates a unique, hardcore, gangster-style motivational quote using Gemini.
+    Returns only the quote text.
+    """
+    if not GEMINI_API_KEY:
+        logger.error("GEMINI_API_KEY for quote generation not configured.")
+        return "Keep grinding. Success is the only option."
+        
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        
+        system_prompt = "Generate one unique, hardcore, gangster-style motivational quote about hustling, grinding, or success. It should be gritty but inspiring. Do not use quotes that promote actual violence. Return ONLY the quote text itself, without any introductory words, quotation marks, or extra formatting. I will handle the formatting."
+        
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=system_prompt,
+        )
+        
+        quote = response.text.strip().replace('"', '').replace('“', '').replace('”', '')
+        return quote
+        
+    except Exception as e:
+        logger.error(f"Failed to generate dynamic quote: {e}")
+        return "The hustle never sleeps. Stay focused on the prize."

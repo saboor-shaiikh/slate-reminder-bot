@@ -17,12 +17,15 @@ start_scheduler()
 
 def format_event(event):
     """Helps format individual event payloads into a readable, natural structure."""
-    deadline_str = event['deadline']
-    try:
-        deadline = datetime.datetime.fromisoformat(deadline_str)
-    except Exception:
-        # Fallback if unparsable
-        return f"{event['title']}\nDue: {deadline_str}"
+    deadline = event.get('deadline')
+    if isinstance(deadline, str):
+        try:
+            deadline = datetime.datetime.fromisoformat(deadline)
+        except Exception:
+            return f"{event.get('title')}\nDue: {deadline}"
+    
+    if not isinstance(deadline, datetime.datetime):
+        return f"{event.get('title')}\nDue: {deadline}"
         
     # Calculate textual time remaining
     now = datetime.datetime.now()
@@ -143,8 +146,66 @@ def webhook_handler():
                         for message in value["messages"]:
                             sender_number = message.get("from")
                             
+                            # Handle documents (ICS files)
+                            if message.get("type") == "document":
+                                doc = message.get("document", {})
+                                filename = doc.get("filename", "")
+                                if filename.lower().endswith(".ics"):
+                                    media_id = doc.get("id")
+                                    logger.info(f"Received ICS document {filename} from {sender_number}.")
+                                    
+                                    from whatsapp_service import get_media_url, download_media_content
+                                    from calendar_service import process_ics_data
+                                    from intent_detection import generate_quote
+                                    
+                                    media_url = get_media_url(media_id)
+                                    if media_url:
+                                        content = download_media_content(media_url)
+                                        if content:
+                                            # Parse and store
+                                            ics_text = content.decode('utf-8')
+                                            events = process_ics_data(ics_text)
+                                            for event in events:
+                                                database.insert_event(
+                                                    event['event_id'],
+                                                    event['title'],
+                                                    event['deadline'],
+                                                    event['event_type']
+                                                )
+                                            
+                                            # Get summary data for the message
+                                            total_events = len(events)
+                                            next_event = database.get_next_deadline()
+                                            next_reminder_str = "None"
+                                            if next_event:
+                                                try:
+                                                    dt = next_event['deadline']
+                                                    if isinstance(dt, str):
+                                                        dt = datetime.datetime.fromisoformat(dt)
+                                                    next_reminder_str = f"{next_event['title']} ({dt.strftime('%A, %I:%M %p')})"
+                                                except:
+                                                    next_reminder_str = next_event.get('title', 'Unknown')
+                                            
+                                            gemini_quote = generate_quote()
+                                            
+                                            sync_msg = (
+                                                "⚙️ *System Update: Calendar Synced*\n\n"
+                                                f"Your new calendar file has been parsed and saved to the database.\n"
+                                                f"• Total events loaded: {total_events}\n"
+                                                f"• Next scheduled reminder: {next_reminder_str}\n\n"
+                                                f"_{gemini_quote}_"
+                                            )
+                                            
+                                            send_message(sender_number, sync_msg)
+                                        else:
+                                            send_message(sender_number, "Failed to download the calendar file.")
+                                    else:
+                                        send_message(sender_number, "Failed to retrieve the calendar file link.")
+                                else:
+                                    send_message(sender_number, "Please send a valid .ics calendar file.")
+
                             # Only parse explicit standard texts
-                            if message.get("type") == "text":
+                            elif message.get("type") == "text":
                                 text = message.get("text", {}).get("body", "")
                                 logger.info(f"Received user message from {sender_number}.")
                                 

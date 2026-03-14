@@ -36,41 +36,10 @@ def _fetch_via_scrape_do() -> requests.Response:
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 
-def fetch_and_parse_calendar():
+def process_ics_data(raw_text: str):
     """
-    Downloads the ICS calendar feed from Slate, parses all events,
-    detects assignments vs quizzes and returns structured event objects.
-
-    Uses a 2-strategy cascade to maximise reliability:
-      1. Direct requests + cf_clearance cookie (lightweight, fast)
-      2. Scrape.do residential proxy (Cloudflare bypass, used only when needed)
+    Parses ICS content into structured event objects.
     """
-    if not SLATE_CALENDAR_URL:
-        logger.error("SLATE_CALENDAR_URL is not configured.")
-        return []
-
-    raw_text = None
-
-    # --- Strategy 1: Direct with cookie ---
-    try:
-        logger.info("Attempting direct calendar fetch (Strategy 1)...")
-        response = _fetch_direct()
-        raw_text = response.text
-        logger.info("Strategy 1 succeeded.")
-    except Exception as e:
-        logger.warning(f"Strategy 1 failed: {e}. Falling back to Scrape.do (Strategy 2)...")
-
-    # --- Strategy 2: Scrape.do fallback ---
-    if raw_text is None:
-        try:
-            response = _fetch_via_scrape_do()
-            raw_text = response.text
-            logger.info("Strategy 2 (Scrape.do) succeeded.")
-        except Exception as e:
-            logger.error(f"Strategy 2 also failed: {e}. Calendar sync aborted.")
-            return []
-
-        
     try:
         # Load the whole ICS file into Calendar parser 
         c = Calendar(raw_text)
@@ -111,5 +80,24 @@ def fetch_and_parse_calendar():
             "event_type": event_type
         })
         
-    logger.info(f"Successfully processed {len(events)} valid events from the calendar.")
+    logger.info(f"Successfully processed {len(events)} valid events.")
     return events
+
+def fetch_and_parse_calendar():
+    """
+    Legacy fetcher - still useful for initial boot if URL is present.
+    """
+    if not SLATE_CALENDAR_URL:
+        logger.error("SLATE_CALENDAR_URL is not configured.")
+        return []
+
+    try:
+        logger.info("Attempting direct calendar fetch...")
+        # Note: In a real scenario, this might still need the Cloudflare headers if used.
+        # But per user request, we are moving to the ICS upload model.
+        response = requests.get(SLATE_CALENDAR_URL, timeout=15)
+        response.raise_for_status()
+        return process_ics_data(response.text)
+    except Exception as e:
+        logger.error(f"Failed to fetch calendar: {e}")
+        return []

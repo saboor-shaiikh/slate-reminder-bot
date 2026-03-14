@@ -1,127 +1,148 @@
-import sqlite3
-import datetime
+import psycopg2
+from psycopg2.extras import RealDictCursor
 import logging
+import datetime
 from typing import List, Dict, Optional
+from config import DATABASE_URL
 
 logger = logging.getLogger(__name__)
 
-DB_NAME = "slate_bot.db"
-
 def _get_connection():
-    return sqlite3.connect(DB_NAME)
+    """Establishes a connection to the PostgreSQL database."""
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        return conn
+    except Exception as e:
+        logger.error(f"Database connection failed: {e}")
+        return None
 
 def initialize_database():
-    """Initializes the events table and system_settings table."""
+    """Sets up the PostgreSQL tables for events and configuration."""
     conn = _get_connection()
+    if not conn:
+        return
     cursor = conn.cursor()
+    
+    # Create events table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS events (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
-            deadline TEXT NOT NULL,
+            deadline TIMESTAMP NOT NULL,
             type TEXT,
-            notified_24h BOOLEAN DEFAULT 0,
-            notified_8h BOOLEAN DEFAULT 0,
-            notified_1h BOOLEAN DEFAULT 0
+            notified_3d BOOLEAN DEFAULT FALSE,
+            notified_24h BOOLEAN DEFAULT FALSE,
+            notified_8h BOOLEAN DEFAULT FALSE,
+            notified_1h BOOLEAN DEFAULT FALSE
         )
     ''')
+    
+    # Create system_settings table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS system_settings (
             key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
+            value TEXT
         )
     ''')
+    
+    # Migration: Ensure notified_3d exists (for existing databases)
+    cursor.execute("""
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name='events' AND column_name='notified_3d'
+    """)
+    if not cursor.fetchone():
+        cursor.execute('ALTER TABLE events ADD COLUMN notified_3d BOOLEAN DEFAULT FALSE')
+        logger.info("Added notified_3d column to events table.")
+
     conn.commit()
     conn.close()
-    logger.info("Database initialized with events and system_settings tables.")
+    logger.info("Database initialized successfully.")
 
 def get_setting(key: str, default: str = None) -> Optional[str]:
     """Retrieves a value from the system_settings table."""
     conn = _get_connection()
+    if not conn:
+        return default
     cursor = conn.cursor()
-    cursor.execute('SELECT value FROM system_settings WHERE key = ?', (key,))
+    cursor.execute('SELECT value FROM system_settings WHERE key = %s', (key,))
     row = cursor.fetchone()
     conn.close()
-    return row[0] if row else default
+    return row['value'] if row else default
 
 def set_setting(key: str, value: str):
     """Sets or updates a value in the system_settings table."""
     conn = _get_connection()
+    if not conn:
+        return
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO system_settings (key, value)
-        VALUES (?, ?)
-        ON CONFLICT(key) DO UPDATE SET value=excluded.value
+        VALUES (%s, %s)
+        ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value
     ''', (key, value))
     conn.commit()
     conn.close()
 
-
 def insert_event(event_id: str, title: str, deadline, event_type: str):
-    """Inserts a new event into the database safely."""
+    """Inserts or updates an assignment/quiz event."""
     conn = _get_connection()
+    if not conn:
+        return
     cursor = conn.cursor()
     
-    # Safely extract timezone-naive datetime string
+    # Standardize deadline to string/datetime if it is an object
+    # Postgres driver handles datetime objects natively
     if hasattr(deadline, 'tzinfo') and deadline.tzinfo is not None:
         deadline = deadline.replace(tzinfo=None)
-        
-    if hasattr(deadline, 'isoformat'):
-        deadline_str = deadline.isoformat()
-    else:
-        deadline_str = str(deadline)
     
     cursor.execute('''
-        INSERT OR IGNORE INTO events (id, title, deadline, type)
-        VALUES (?, ?, ?, ?)
-    ''', (event_id, title, deadline_str, event_type))
+        INSERT INTO events (id, title, deadline, type)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT(id) DO UPDATE SET
+            title=EXCLUDED.title,
+            deadline=EXCLUDED.deadline,
+            type=EXCLUDED.type
+    ''', (event_id, title, deadline, event_type))
     conn.commit()
     conn.close()
 
 def get_pending_events() -> List[Dict]:
-    """Returns all pending events that haven't passed yet."""
+    """Retrieves all events that haven't passed and still need notifications."""
     conn = _get_connection()
-    conn.row_factory = sqlite3.Row
+    if not conn:
+        return []
     cursor = conn.cursor()
-    
-    now_str = datetime.datetime.now().isoformat()
-    cursor.execute('''
-        SELECT * FROM events 
-        WHERE deadline > ? 
-        ORDER BY deadline ASC
-    ''', (now_str,))
-    
-    rows = cursor.fetchall()
+    # In Postgres, we use NOW() for current timestamp comparison
+    cursor.execute("SELECT * FROM events WHERE deadline > NOW() ORDER BY deadline ASC")
+    events = cursor.fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+    # RealDictCursor return objects that behave like dicts, but we'll cast to list[dict] for safety
+    return [dict(e) for e in events]
 
 def get_next_deadline() -> Optional[Dict]:
-    """Returns the single next pending deadline."""
+    """Returns the single closest upcoming event."""
     conn = _get_connection()
-    conn.row_factory = sqlite3.Row
+    if not conn:
+        return None
     cursor = conn.cursor()
-    
-    now_str = datetime.datetime.now().isoformat()
-    cursor.execute('''
-        SELECT * FROM events 
-        WHERE deadline > ? 
-        ORDER BY deadline ASC 
-        LIMIT 1
-    ''', (now_str,))
-    
-    row = cursor.fetchone()
+    cursor.execute("SELECT * FROM events WHERE deadline > NOW() ORDER BY deadline ASC LIMIT 1")
+    event = cursor.fetchone()
     conn.close()
-    return dict(row) if row else None
+    return dict(event) if event else None
 
-def mark_notification_sent(event_id: str, notification_type: str):
-    """Marks that a specific reminder interval has been sent for an event."""
+def mark_notification_sent(event_id: str, column: str):
+    """Flags a specific notification window as completed for an event."""
+    valid_cols = ['notified_3d', 'notified_24h', 'notified_8h', 'notified_1h']
+    if column not in valid_cols:
+        return
+
     conn = _get_connection()
+    if not conn:
+        return
     cursor = conn.cursor()
-    
-    # Prevent SQL injection by ensuring only legitimate columns are used
-    if notification_type in ('notified_24h', 'notified_8h', 'notified_1h'):
-        query = f"UPDATE events SET {notification_type} = 1 WHERE id = ?"
-        cursor.execute(query, (event_id,))
-        conn.commit()
-    
+    # Standard SQL update with column name formatted in (safe due to whitelist)
+    query = f"UPDATE events SET {column} = TRUE WHERE id = %s"
+    cursor.execute(query, (event_id,))
+    conn.commit()
     conn.close()
