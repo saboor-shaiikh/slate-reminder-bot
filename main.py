@@ -1,4 +1,5 @@
 import logging
+import os
 import database
 from reminder_engine import start_scheduler
 from webhook_server import start_server
@@ -19,14 +20,13 @@ def main():
     
     # 1. Initialize DB / Setup table states properly
     database.initialize_database()
-    logger.info("SQLite Database successfully mapped across logic layer.")
+    logger.info("PostgreSQL Database successfully mapped across logic layer.")
     
     # 2. Launch Background Processes
     start_scheduler()
     logger.info("Reminders orchestration routing online.")
     
     # 3. Mount REST Server for webhook event listeners
-    import os
     port = int(os.environ.get("PORT", 5000))
     logger.info(f"Starting Flask application core webhook server on port {port}...")
     start_server(port=port)

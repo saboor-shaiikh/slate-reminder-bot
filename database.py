@@ -3,7 +3,7 @@ from psycopg2.extras import RealDictCursor
 import logging
 import datetime
 from typing import List, Dict, Optional
-from config import DATABASE_URL
+from bot_config import DATABASE_URL
 
 logger = logging.getLogger(__name__)
 

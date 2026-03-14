@@ -1,6 +1,7 @@
 import requests
 import logging
-from config import WHATSAPP_API_TOKEN, WHATSAPP_PHONE_NUMBER_ID
+from typing import Optional
+from bot_config import WHATSAPP_API_TOKEN, WHATSAPP_PHONE_NUMBER_ID
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ def send_message(phone_number: str, text: str):
             logger.error(f"WhatsApp API Response: {e.response.text}")
         return False
 
-def get_media_url(media_id: str) -> str:
+def get_media_url(media_id: str) -> Optional[str]:
     """Retrieves the direct download URL for a media item from the WhatsApp API."""
     url = f"https://graph.facebook.com/v18.0/{media_id}"
     headers = {"Authorization": f"Bearer {WHATSAPP_API_TOKEN}"}
@@ -56,7 +57,7 @@ def get_media_url(media_id: str) -> str:
         logger.error(f"Failed to retrieve media URL for {media_id}: {e}")
         return None
 
-def download_media_content(media_url: str) -> bytes:
+def download_media_content(media_url: str) -> Optional[bytes]:
     """Downloads the actual file content from the retrieved media URL."""
     headers = {"Authorization": f"Bearer {WHATSAPP_API_TOKEN}"}
     

@@ -1,19 +1,18 @@
 import logging
 import datetime
+import os
 from flask import Flask, request, jsonify
-from whatsapp_service import send_message
-from intent_detection import detect_intent
+
+# Local module imports
 import database
-from reminder_engine import start_scheduler
+from whatsapp_service import send_message, get_media_url, download_media_content
+from intent_detection import detect_intent, generate_quote
+from calendar_service import process_ics_data
 
 logger = logging.getLogger(__name__)
 
 
 app = Flask(__name__)
-
-# Initialize database and background schedulers on startup
-database.initialize_database()
-start_scheduler()
 
 def format_event(event):
     """Helps format individual event payloads into a readable, natural structure."""
@@ -74,7 +73,10 @@ def handle_intent(intent_data: dict, phone_number: str):
         today_events = []
         for e in events:
             try:
-                 if datetime.datetime.fromisoformat(e['deadline']).date() == now.date():
+                 deadline = e['deadline']
+                 if isinstance(deadline, str):
+                     deadline = datetime.datetime.fromisoformat(deadline)
+                 if deadline.date() == now.date():
                      today_events.append(e)
             except Exception:
                  pass
@@ -91,7 +93,10 @@ def handle_intent(intent_data: dict, phone_number: str):
         tomorrow_events = []
         for e in events:
              try:
-                 if datetime.datetime.fromisoformat(e['deadline']).date() == tomorrow:
+                 deadline = e['deadline']
+                 if isinstance(deadline, str):
+                     deadline = datetime.datetime.fromisoformat(deadline)
+                 if deadline.date() == tomorrow:
                      tomorrow_events.append(e)
              except Exception:
                  pass
@@ -153,10 +158,6 @@ def webhook_handler():
                                 if filename.lower().endswith(".ics"):
                                     media_id = doc.get("id")
                                     logger.info(f"Received ICS document {filename} from {sender_number}.")
-                                    
-                                    from whatsapp_service import get_media_url, download_media_content
-                                    from calendar_service import process_ics_data
-                                    from intent_detection import generate_quote
                                     
                                     media_url = get_media_url(media_id)
                                     if media_url:
@@ -222,7 +223,6 @@ def webhook_handler():
         return jsonify({"status": "error"}), 500
 
 def start_server(port=None):
-    import os
     if port is None:
         port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
