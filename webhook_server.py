@@ -40,11 +40,7 @@ def format_event(event):
     else:
         time_remaining = "Past due"
         
-    return f"""
-{event['title']}
-Due: {deadline.strftime('%d %B %Y')}
-Time Remaining: {time_remaining}
-""".strip()
+    return f"• *{event['title']}*\n  _{deadline.strftime('%d %b, %I:%M %p')}_ ({time_remaining})"
 
 def handle_intent(intent_data: dict, phone_number: str):
     """Processes user intents, interfaces with database and sends appropriate replies."""

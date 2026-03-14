@@ -25,9 +25,10 @@ def detect_intent(message_text: str) -> dict:
         Return ONLY valid JSON format representing the intent. Do NOT add markdown blocks, formatting, or conversational text.
         
         Example outputs:
-        {{"intent": "next_deadline"}}
-        {{"intent": "pending_assignments"}}
-        {{"intent": "due_today"}}
+        {{"intent": "next_deadline"}} (User says: "what's next?", "next deadline?")
+        {{"intent": "pending_assignments"}} (User says: "any assignments left?", "pending tasks")
+        {{"intent": "due_today"}} (User says: "what's due today?", "today's schedule")
+        {{"intent": "all_deadlines"}} (User says: "show all events", "list everything", "what are my deadlines?")
         
         User message: "{message_text}"
         """
