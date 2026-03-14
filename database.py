@@ -11,7 +11,7 @@ def _get_connection():
     return sqlite3.connect(DB_NAME)
 
 def initialize_database():
-    """Initializes the events table."""
+    """Initializes the events table and system_settings table."""
     conn = _get_connection()
     cursor = conn.cursor()
     cursor.execute('''
@@ -25,9 +25,37 @@ def initialize_database():
             notified_1h BOOLEAN DEFAULT 0
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS system_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    ''')
     conn.commit()
     conn.close()
-    logger.info("Database initialized with events table.")
+    logger.info("Database initialized with events and system_settings tables.")
+
+def get_setting(key: str, default: str = None) -> Optional[str]:
+    """Retrieves a value from the system_settings table."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT value FROM system_settings WHERE key = ?', (key,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else default
+
+def set_setting(key: str, value: str):
+    """Sets or updates a value in the system_settings table."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO system_settings (key, value)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value
+    ''', (key, value))
+    conn.commit()
+    conn.close()
+
 
 def insert_event(event_id: str, title: str, deadline, event_type: str):
     """Inserts a new event into the database safely."""

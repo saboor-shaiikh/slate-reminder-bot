@@ -8,6 +8,7 @@ from reminder_engine import start_scheduler
 
 logger = logging.getLogger(__name__)
 
+
 app = Flask(__name__)
 
 # Initialize database and background schedulers on startup
