@@ -26,8 +26,10 @@ def main():
     logger.info("Reminders orchestration routing online.")
     
     # 3. Mount REST Server for webhook event listeners
-    logger.info("Starting Flask application core webhook server natively on port 5000...")
-    start_server(port=5000)
+    import os
+    port = int(os.environ.get("PORT", 5000))
+    logger.info(f"Starting Flask application core webhook server on port {port}...")
+    start_server(port=port)
 
 if __name__ == "__main__":
     main()

@@ -160,5 +160,8 @@ def webhook_handler():
         logger.error(f"Error handling webhook payload stream: {e}")
         return jsonify({"status": "error"}), 500
 
-def start_server(port=5000):
+def start_server(port=None):
+    import os
+    if port is None:
+        port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
