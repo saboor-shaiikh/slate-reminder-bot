@@ -28,7 +28,7 @@ def initialize_database():
         CREATE TABLE IF NOT EXISTS events (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
-            deadline TIMESTAMP NOT NULL,
+            deadline TIMESTAMPTZ NOT NULL,
             type TEXT,
             notified_3d BOOLEAN DEFAULT FALSE,
             notified_24h BOOLEAN DEFAULT FALSE,
@@ -54,6 +54,16 @@ def initialize_database():
     if not cursor.fetchone():
         cursor.execute('ALTER TABLE events ADD COLUMN notified_3d BOOLEAN DEFAULT FALSE')
         logger.info("Added notified_3d column to events table.")
+    
+    # Migration: Ensure deadline is TIMESTAMPTZ
+    cursor.execute("""
+        SELECT data_type 
+        FROM information_schema.columns 
+        WHERE table_name='events' AND column_name='deadline'
+    """)
+    if cursor.fetchone()['data_type'] == 'timestamp without time zone':
+        cursor.execute("ALTER TABLE events ALTER COLUMN deadline TYPE TIMESTAMPTZ")
+        logger.info("Changed deadline column to TIMESTAMPTZ.")
 
     conn.commit()
     conn.close()
@@ -91,10 +101,7 @@ def insert_event(event_id: str, title: str, deadline, event_type: str):
         return
     cursor = conn.cursor()
     
-    # Standardize deadline to string/datetime if it is an object
-    # Postgres driver handles datetime objects natively
-    if hasattr(deadline, 'tzinfo') and deadline.tzinfo is not None:
-        deadline = deadline.replace(tzinfo=None)
+    # Standardize deadline: Postgres driver handles aware datetime objects natively
     
     cursor.execute('''
         INSERT INTO events (id, title, deadline, type)
