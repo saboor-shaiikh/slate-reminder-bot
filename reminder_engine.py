@@ -104,5 +104,6 @@ def start_scheduler():
     scheduler.start()
     logger.info("Reminder background scheduling engine activated fully.")
 
-    # Run immediate bootstrap
-    check_reminders()
+    # Run immediate bootstrap in a separate thread to avoid blocking server start
+    import threading
+    threading.Thread(target=check_reminders, daemon=True).start()

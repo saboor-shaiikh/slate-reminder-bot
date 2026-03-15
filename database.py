@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 def _get_connection():
     """Establishes a connection to the PostgreSQL database."""
     try:
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor, connect_timeout=10)
         return conn
     except Exception as e:
         logger.error(f"Database connection failed: {e}")
