@@ -1,6 +1,8 @@
 # Slate Reminder Bot
 
-Slate Reminder Bot is a Telegram assistant for students who want deadline reminders from their LMS calendar.
+Owner: Abdul Saboor
+
+Slate Reminder Bot is a Telegram assistant for students who want deadline reminders from their University Of Lahore's LMS calendar.
 
 You send the bot an `.ics` file, it stores events in Supabase Postgres, and then keeps reminding you before each deadline.
 
@@ -8,13 +10,19 @@ You send the bot an `.ics` file, it stores events in Supabase Postgres, and then
 
 - Accepts `.ics` files in Telegram chat
 - Extracts events and saves them to PostgreSQL (Supabase)
+- Extracts and displays course names when available (for example: `Machine Learning`)
 - Answers deadline questions in Telegram
+- Returns all tied events for `next deadline` when two or more deadlines are at the same time
 - Sends automatic reminders at:
   - 72 hours before deadline
   - 24 hours before deadline
   - 8 hours before deadline
   - 1 hour before deadline
-- Sends one daily motivational quote at 8:00 AM PST
+- Sends scheduled quote messages in PKT:
+   - 7:00 PM PKT: `Good morning` 
+   - 11:00 PM PKT: `Good night`
+- Appends a random quote under bot replies and reminder messages
+- Uses Pakistan time (PKT) for reminder tracking and user-visible deadline formatting
 
 ## Supported Chat Queries
 
@@ -25,6 +33,70 @@ You can ask things like:
 - due today
 - due tomorrow
 - all deadlines
+
+## Message Templates
+
+These are the message formats used by the bot.
+
+1. All Deadlines response
+
+```text
+All Deadlines
+
+• *Assignment 2*
+   Course: Machine Learning
+   _19 Apr, 07:00 PM PKT_ (35 days)
+
+• *Quiz 1*
+   Course: Artificial Intelligence
+   _17 Mar, 06:59 PM PKT_ (2 days)
+
+_Stay focused and keep moving._
+```
+
+2. Next Deadline response (tied events supported)
+
+```text
+Next Deadline
+
+• *Assignment 1*
+   Course: Machine Learning
+   _17 Mar, 06:59 PM PKT_ (2 days)
+
+• *Quiz 1*
+   Course: Machine Learning
+   _17 Mar, 06:59 PM PKT_ (2 days)
+
+_One step at a time. You are building momentum._
+```
+
+3. Scheduled reminder
+
+```text
+⏰ *Slate Reminder*
+
+📝 Assignment 2
+
+📅 Deadline:
+19 April 2026
+07:00 PM PKT
+
+⏳ Due in 24 hours
+
+_Discipline beats motivation. Show up anyway._
+```
+
+4. ICS sync confirmation
+
+```text
+System Update: Calendar Synced
+
+Your new calendar file has been parsed and saved to the database.
+Total events loaded: 12
+Next scheduled reminder: Assignment 1 (Monday, 06:59 PM PKT) + 1 more
+
+_Consistency today creates freedom tomorrow._
+```
 
 ## Tech Stack
 
@@ -115,6 +187,7 @@ If your local network blocks `api.telegram.org`, run the same command from a net
 - Deadlines are stored as timezone-aware timestamps in Postgres.
 - If an event deadline changes, reminder flags are reset for that event.
 - This project is currently designed for one target chat (`TARGET_CHAT_ID`).
+- Existing DB rows created before course extraction updates may not include course names until `.ics` is synced again.
 
 ## License
 
