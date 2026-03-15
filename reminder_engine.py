@@ -9,34 +9,34 @@ from bot_config import TARGET_CHAT_ID
 
 logger = logging.getLogger(__name__)
 UTC = datetime.timezone.utc
-LOCAL_TZ = pytz.timezone('America/Los_Angeles')
+PAK_TZ = pytz.timezone('Asia/Karachi')
 _scheduler = None
 
 
-def _to_utc_datetime(value):
+def _to_pkt_datetime(value):
     if isinstance(value, str):
         value = datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
     if not isinstance(value, datetime.datetime):
         raise ValueError("deadline is not a datetime")
     if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(PAK_TZ)
 
 
 def _with_quote(message_text: str) -> str:
     quote = generate_quote()
-    return f"{message_text}\n\nQuote: {quote}"
+    return f"{message_text}\n\n_{quote}_"
 
 
-def send_daily_quote():
-    """Sends a daily motivational quote via Telegram."""
+def send_scheduled_quote(greeting_text: str):
+    """Sends a greeting and motivational quote to Telegram."""
     if not TARGET_CHAT_ID:
-        logger.warning("TARGET_CHAT_ID missing. Skipping daily quote send.")
+        logger.warning("TARGET_CHAT_ID missing. Skipping scheduled quote send.")
         return
 
     gemini_quote = generate_quote()
-    message = f"_{gemini_quote}_"
-    logger.info("Sending dynamic daily active-window quote...")
+    message = f"{greeting_text}\n\n_{gemini_quote}_"
+    logger.info(f"Sending scheduled quote message: {greeting_text}")
     send_message(TARGET_CHAT_ID, message)
 
 
@@ -48,11 +48,11 @@ def check_reminders():
 
     logger.info("Executing checking mechanism for deadline reminders...")
     events = database.get_pending_events()
-    now = datetime.datetime.now(UTC)
+    now = datetime.datetime.now(PAK_TZ)
 
     for event in events:
         try:
-            deadline = _to_utc_datetime(event['deadline'])
+            deadline = _to_pkt_datetime(event['deadline'])
         except Exception:
             logger.warning(f"Failed to parse datetime for event deadline: {event.get('deadline')}. Skipping.")
             continue
@@ -93,7 +93,7 @@ def check_reminders():
 
 def _format_reminder(event, hours, deadline):
     """Produces the formatted message payload."""
-    deadline_local = deadline.astimezone(LOCAL_TZ)
+    deadline_local = deadline.astimezone(PAK_TZ)
     date_formatted = deadline_local.strftime('%d %B %Y')
     time_formatted = deadline_local.strftime('%I:%M %p %Z')
 
@@ -124,9 +124,25 @@ def start_scheduler():
     # Process potential active deadlines frequently (30 mins)
     scheduler.add_job(check_reminders, 'interval', minutes=30, id='reminder_job_interval')
 
-    # Daily quote to keep the 24h window open (8 AM PST)
-    pst = pytz.timezone('America/Los_Angeles')
-    scheduler.add_job(send_daily_quote, 'cron', hour=8, minute=0, timezone=pst, id='daily_quote_job')
+    # Scheduled quote messages in Pakistan time
+    scheduler.add_job(
+        send_scheduled_quote,
+        'cron',
+        hour=19,
+        minute=0,
+        timezone=PAK_TZ,
+        id='good_morning_quote_job',
+        args=["Good morning"],
+    )
+    scheduler.add_job(
+        send_scheduled_quote,
+        'cron',
+        hour=23,
+        minute=0,
+        timezone=PAK_TZ,
+        id='good_night_quote_job',
+        args=["Good night"],
+    )
 
     scheduler.start()
     _scheduler = scheduler

@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 UTC = datetime.timezone.utc
+PAK_TZ = datetime.timezone(datetime.timedelta(hours=5))
 
 
 def _parse_deadline(deadline):
@@ -37,7 +38,7 @@ def _can_process_chat(chat_id) -> bool:
 
 def _with_quote(message_text: str) -> str:
     quote = generate_quote()
-    return f"{message_text}\n\nQuote: {quote}"
+    return f"{message_text}\n\n_{quote}_"
 
 def format_event(event):
     """Helps format individual event payloads into a readable, natural structure."""
@@ -45,11 +46,11 @@ def format_event(event):
     if not deadline:
         return f"{event.get('title')}\nDue: {deadline}"
 
-    deadline_local = deadline.astimezone()
+    deadline_local = deadline.astimezone(PAK_TZ)
 
     # Calculate textual time remaining
-    now = datetime.datetime.now(UTC)
-    delta = deadline - now
+    now = datetime.datetime.now(PAK_TZ)
+    delta = deadline_local - now
     
     if delta.total_seconds() > 0:
         hours = int(delta.total_seconds() // 3600)
@@ -63,7 +64,7 @@ def format_event(event):
         
     course_name = (event.get('course') or "").strip()
     course_line = f"\n  Course: {course_name}" if course_name else ""
-    return f"• *{event['title']}*{course_line}\n  _{deadline_local.strftime('%d %b, %I:%M %p %Z')}_ ({time_remaining})"
+    return f"• *{event['title']}*{course_line}\n  _{deadline_local.strftime('%d %b, %I:%M %p PKT')}_ ({time_remaining})"
 
 def handle_intent(intent_data: dict, chat_id: str):
     """Processes user intents, interfaces with database and sends appropriate replies."""
@@ -89,12 +90,12 @@ def handle_intent(intent_data: dict, chat_id: str):
             
     elif intent == "due_today":
         events = database.get_pending_events()
-        now_local_date = datetime.datetime.now().date()
+        now_local_date = datetime.datetime.now(PAK_TZ).date()
         today_events = []
         for e in events:
             try:
                  deadline = _parse_deadline(e.get('deadline'))
-                 if deadline and deadline.astimezone().date() == now_local_date:
+                 if deadline and deadline.astimezone(PAK_TZ).date() == now_local_date:
                      today_events.append(e)
             except Exception:
                  pass
@@ -107,12 +108,12 @@ def handle_intent(intent_data: dict, chat_id: str):
             
     elif intent == "due_tomorrow":
         events = database.get_pending_events()
-        tomorrow = datetime.datetime.now().date() + datetime.timedelta(days=1)
+        tomorrow = datetime.datetime.now(PAK_TZ).date() + datetime.timedelta(days=1)
         tomorrow_events = []
         for e in events:
              try:
                  deadline = _parse_deadline(e.get('deadline'))
-                 if deadline and deadline.astimezone().date() == tomorrow:
+                 if deadline and deadline.astimezone(PAK_TZ).date() == tomorrow:
                      tomorrow_events.append(e)
              except Exception:
                  pass
@@ -200,7 +201,7 @@ def webhook_handler(secret=None):
                                 if dt:
                                     extra = len(next_events) - 1
                                     extra_suffix = f" + {extra} more" if extra > 0 else ""
-                                    next_reminder_str = f"{next_event['title']} ({dt.astimezone().strftime('%A, %I:%M %p %Z')}){extra_suffix}"
+                                    next_reminder_str = f"{next_event['title']} ({dt.astimezone(PAK_TZ).strftime('%A, %I:%M %p PKT')}){extra_suffix}"
                             except Exception:
                                 next_reminder_str = next_event.get('title', 'Unknown')
 
