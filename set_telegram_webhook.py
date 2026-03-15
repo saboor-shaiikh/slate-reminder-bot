@@ -19,7 +19,7 @@ def main() -> int:
     parser.add_argument(
         "--base-url",
         required=True,
-        help="Public base URL of your deployed app, e.g. https://your-app.onrender.com",
+        help="Public base URL of your deployed app, e.g. https://slate-reminder-bot.onrender.com",
     )
     args = parser.parse_args()
 

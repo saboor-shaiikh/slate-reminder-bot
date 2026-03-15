@@ -31,9 +31,9 @@ Set these locally and on Render:
 
 ## Webhook Route Format
 - If `TELEGRAM_WEBHOOK_SECRET` is set:
-  - `https://<your-render-domain>/telegram/webhook/<TELEGRAM_WEBHOOK_SECRET>`
+   - `https://slate-reminder-bot.onrender.com/telegram/webhook/<TELEGRAM_WEBHOOK_SECRET>`
 - If not set:
-  - `https://<your-render-domain>/telegram/webhook`
+   - `https://slate-reminder-bot.onrender.com/telegram/webhook`
 
 ## Verification Commands
 1. Install deps:
