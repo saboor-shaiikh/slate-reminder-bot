@@ -56,16 +56,19 @@ def format_event(event):
     else:
         time_remaining = "Past due"
         
-    return f"• *{event['title']}*\n  _{deadline_local.strftime('%d %b, %I:%M %p %Z')}_ ({time_remaining})"
+    course_name = (event.get('course') or "").strip()
+    course_line = f"\n  Course: {course_name}" if course_name else ""
+    return f"• *{event['title']}*{course_line}\n  _{deadline_local.strftime('%d %b, %I:%M %p %Z')}_ ({time_remaining})"
 
 def handle_intent(intent_data: dict, chat_id: str):
     """Processes user intents, interfaces with database and sends appropriate replies."""
     intent = intent_data.get("intent")
     
     if intent == "next_deadline":
-        event = database.get_next_deadline()
-        if event:
-            response_text = f"Next Deadline\n\n{format_event(event)}"
+        events = database.get_next_deadlines()
+        if events:
+            rendered = "\n\n".join(format_event(e) for e in events)
+            response_text = f"Next Deadline\n\n{rendered}"
         else:
             response_text = "You have no upcoming deadlines!"
             
@@ -178,17 +181,21 @@ def webhook_handler(secret=None):
                                 event['event_id'],
                                 event['title'],
                                 event['deadline'],
-                                event['event_type']
+                                event['event_type'],
+                                event.get('course_name')
                             )
 
                         total_events = len(events)
-                        next_event = database.get_next_deadline()
+                        next_events = database.get_next_deadlines()
                         next_reminder_str = "None"
-                        if next_event:
+                        if next_events:
+                            next_event = next_events[0]
                             try:
                                 dt = _parse_deadline(next_event['deadline'])
                                 if dt:
-                                    next_reminder_str = f"{next_event['title']} ({dt.astimezone().strftime('%A, %I:%M %p %Z')})"
+                                    extra = len(next_events) - 1
+                                    extra_suffix = f" + {extra} more" if extra > 0 else ""
+                                    next_reminder_str = f"{next_event['title']} ({dt.astimezone().strftime('%A, %I:%M %p %Z')}){extra_suffix}"
                             except Exception:
                                 next_reminder_str = next_event.get('title', 'Unknown')
 

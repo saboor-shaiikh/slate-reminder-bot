@@ -67,6 +67,7 @@ def initialize_database():
             CREATE TABLE IF NOT EXISTS events (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
+                course TEXT,
                 deadline TIMESTAMPTZ NOT NULL,
                 type TEXT,
                 notified_3d BOOLEAN DEFAULT FALSE,
@@ -93,6 +94,16 @@ def initialize_database():
         if not cursor.fetchone():
             cursor.execute('ALTER TABLE events ADD COLUMN notified_3d BOOLEAN DEFAULT FALSE')
             logger.info("Added notified_3d column to events table.")
+
+        # Migration: Ensure course column exists
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name='events' AND column_name='course'
+        """)
+        if not cursor.fetchone():
+            cursor.execute('ALTER TABLE events ADD COLUMN course TEXT')
+            logger.info("Added course column to events table.")
 
         # Migration: Ensure deadline is TIMESTAMPTZ
         cursor.execute("""
@@ -156,7 +167,7 @@ def set_setting(key: str, value: str):
             cursor.close()
         _put_connection(conn)
 
-def insert_event(event_id: str, title: str, deadline, event_type: str):
+def insert_event(event_id: str, title: str, deadline, event_type: str, course_name: str = None):
     """Inserts or updates an assignment/quiz event."""
     conn = _get_connection()
     if not conn:
@@ -166,17 +177,18 @@ def insert_event(event_id: str, title: str, deadline, event_type: str):
         cursor = conn.cursor()
 
         cursor.execute('''
-            INSERT INTO events (id, title, deadline, type)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO events (id, title, course, deadline, type)
+            VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT(id) DO UPDATE SET
                 title=EXCLUDED.title,
+                course=COALESCE(EXCLUDED.course, events.course),
                 deadline=EXCLUDED.deadline,
                 type=EXCLUDED.type,
                 notified_3d=CASE WHEN events.deadline IS DISTINCT FROM EXCLUDED.deadline THEN FALSE ELSE events.notified_3d END,
                 notified_24h=CASE WHEN events.deadline IS DISTINCT FROM EXCLUDED.deadline THEN FALSE ELSE events.notified_24h END,
                 notified_8h=CASE WHEN events.deadline IS DISTINCT FROM EXCLUDED.deadline THEN FALSE ELSE events.notified_8h END,
                 notified_1h=CASE WHEN events.deadline IS DISTINCT FROM EXCLUDED.deadline THEN FALSE ELSE events.notified_1h END
-        ''', (event_id, title, deadline, event_type))
+        ''', (event_id, title, course_name, deadline, event_type))
         conn.commit()
     except Exception as e:
         logger.error(f"Failed to insert/update event {event_id}: {e}")
@@ -221,6 +233,35 @@ def get_next_deadline() -> Optional[Dict]:
     except Exception as e:
         logger.error(f"Failed to fetch next deadline: {e}")
         return None
+    finally:
+        if cursor:
+            cursor.close()
+        _put_connection(conn)
+
+
+def get_next_deadlines() -> List[Dict]:
+    """Returns all events that share the nearest upcoming deadline timestamp."""
+    conn = _get_connection()
+    if not conn:
+        return []
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT *
+            FROM events
+            WHERE deadline = (
+                SELECT MIN(deadline)
+                FROM events
+                WHERE deadline > NOW()
+            )
+            ORDER BY title ASC
+        ''')
+        events = cursor.fetchall()
+        return [dict(e) for e in events]
+    except Exception as e:
+        logger.error(f"Failed to fetch next deadlines: {e}")
+        return []
     finally:
         if cursor:
             cursor.close()
