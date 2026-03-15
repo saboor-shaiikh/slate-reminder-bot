@@ -3,35 +3,51 @@ import datetime
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 import database
-from whatsapp_service import send_message
+from telegram_service import send_message
 from intent_detection import generate_quote
-from bot_config import TARGET_PHONE_NUMBER
+from bot_config import TARGET_CHAT_ID
 
 logger = logging.getLogger(__name__)
+UTC = datetime.timezone.utc
+LOCAL_TZ = pytz.timezone('America/Los_Angeles')
+_scheduler = None
+
+
+def _to_utc_datetime(value):
+    if isinstance(value, str):
+        value = datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
+    if not isinstance(value, datetime.datetime):
+        raise ValueError("deadline is not a datetime")
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def send_daily_quote():
-    """Sends a dynamic inspirational quote from Gemini to keep the WhatsApp 24h window open."""
+    """Sends a daily motivational quote via Telegram."""
+    if not TARGET_CHAT_ID:
+        logger.warning("TARGET_CHAT_ID missing. Skipping daily quote send.")
+        return
+
     gemini_quote = generate_quote()
     message = f"_{gemini_quote}_"
     logger.info("Sending dynamic daily active-window quote...")
-    send_message(TARGET_PHONE_NUMBER, message)
+    send_message(TARGET_CHAT_ID, message)
 
 
 def check_reminders():
     """Scheduled heartbeat job to trigger automated messages based on target windows."""
+    if not TARGET_CHAT_ID:
+        logger.warning("TARGET_CHAT_ID missing. Skipping reminder check run.")
+        return
+
     logger.info("Executing checking mechanism for deadline reminders...")
     events = database.get_pending_events()
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(UTC)
 
     for event in events:
         try:
-            deadline = event['deadline']
-            if isinstance(deadline, str):
-                deadline = datetime.datetime.fromisoformat(deadline)
-            # Strip timezone info for consistent naive datetime comparison
-            if hasattr(deadline, 'tzinfo') and deadline.tzinfo is not None:
-                deadline = deadline.replace(tzinfo=None)
+            deadline = _to_utc_datetime(event['deadline'])
         except Exception:
             logger.warning(f"Failed to parse datetime for event deadline: {event.get('deadline')}. Skipping.")
             continue
@@ -64,7 +80,7 @@ def check_reminders():
         # Send reminder if applicable and mutate DB status safely
         if reminder_text and notification_type:
             logger.info(f"[{event['title']}] matches {notification_type} timeline. Emitting...")
-            success = send_message(TARGET_PHONE_NUMBER, reminder_text)
+            success = send_message(TARGET_CHAT_ID, reminder_text)
             if success:
                 database.mark_notification_sent(event['id'], notification_type)
                 logger.info(f"Marked reminder sent ({notification_type}) internally for event {event['id']}.")
@@ -72,8 +88,9 @@ def check_reminders():
 
 def _format_reminder(event, hours, deadline):
     """Produces the formatted message payload."""
-    date_formatted = deadline.strftime('%d %B %Y')
-    time_formatted = deadline.strftime('%I:%M %p')
+    deadline_local = deadline.astimezone(LOCAL_TZ)
+    date_formatted = deadline_local.strftime('%d %B %Y')
+    time_formatted = deadline_local.strftime('%I:%M %p %Z')
 
     time_str = f"{hours} hours"
     if hours == 72:
@@ -92,6 +109,11 @@ def _format_reminder(event, hours, deadline):
 
 def start_scheduler():
     """Initializes and runs apscheduler thread to continuously loop backend systems."""
+    global _scheduler
+    if _scheduler and _scheduler.running:
+        logger.info("Scheduler already running. Skipping duplicate start.")
+        return
+
     scheduler = BackgroundScheduler()
 
     # Process potential active deadlines frequently (30 mins)
@@ -102,6 +124,7 @@ def start_scheduler():
     scheduler.add_job(send_daily_quote, 'cron', hour=8, minute=0, timezone=pst, id='daily_quote_job')
 
     scheduler.start()
+    _scheduler = scheduler
     logger.info("Reminder background scheduling engine activated fully.")
 
     # Run immediate bootstrap in a separate thread to avoid blocking server start

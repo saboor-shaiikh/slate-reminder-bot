@@ -5,29 +5,45 @@ from flask import Flask, request, jsonify
 
 # Local module imports
 import database
-from whatsapp_service import send_message, get_media_url, download_media_content
+from telegram_service import send_message, get_file_path, download_file_content
 from intent_detection import detect_intent, generate_quote
 from calendar_service import process_ics_data
+from bot_config import TARGET_CHAT_ID, TELEGRAM_WEBHOOK_SECRET
 
 logger = logging.getLogger(__name__)
 
 
 app = Flask(__name__)
+UTC = datetime.timezone.utc
+
+
+def _parse_deadline(deadline):
+    if isinstance(deadline, str):
+        deadline = datetime.datetime.fromisoformat(deadline.replace('Z', '+00:00'))
+    if not isinstance(deadline, datetime.datetime):
+        return None
+    if deadline.tzinfo is None:
+        return deadline.replace(tzinfo=UTC)
+    return deadline.astimezone(UTC)
+
+
+def _can_process_chat(chat_id) -> bool:
+    if chat_id is None:
+        return False
+    if not TARGET_CHAT_ID:
+        return True
+    return str(chat_id) == str(TARGET_CHAT_ID)
 
 def format_event(event):
     """Helps format individual event payloads into a readable, natural structure."""
-    deadline = event.get('deadline')
-    if isinstance(deadline, str):
-        try:
-            deadline = datetime.datetime.fromisoformat(deadline)
-        except Exception:
-            return f"{event.get('title')}\nDue: {deadline}"
-    
-    if not isinstance(deadline, datetime.datetime):
+    deadline = _parse_deadline(event.get('deadline'))
+    if not deadline:
         return f"{event.get('title')}\nDue: {deadline}"
-        
+
+    deadline_local = deadline.astimezone()
+
     # Calculate textual time remaining
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(UTC)
     delta = deadline - now
     
     if delta.total_seconds() > 0:
@@ -40,9 +56,9 @@ def format_event(event):
     else:
         time_remaining = "Past due"
         
-    return f"• *{event['title']}*\n  _{deadline.strftime('%d %b, %I:%M %p')}_ ({time_remaining})"
+    return f"• *{event['title']}*\n  _{deadline_local.strftime('%d %b, %I:%M %p %Z')}_ ({time_remaining})"
 
-def handle_intent(intent_data: dict, phone_number: str):
+def handle_intent(intent_data: dict, chat_id: str):
     """Processes user intents, interfaces with database and sends appropriate replies."""
     intent = intent_data.get("intent")
     
@@ -65,14 +81,12 @@ def handle_intent(intent_data: dict, phone_number: str):
             
     elif intent == "due_today":
         events = database.get_pending_events()
-        now = datetime.datetime.now()
+        now_local_date = datetime.datetime.now().date()
         today_events = []
         for e in events:
             try:
-                 deadline = e['deadline']
-                 if isinstance(deadline, str):
-                     deadline = datetime.datetime.fromisoformat(deadline)
-                 if deadline.date() == now.date():
+                 deadline = _parse_deadline(e.get('deadline'))
+                 if deadline and deadline.astimezone().date() == now_local_date:
                      today_events.append(e)
             except Exception:
                  pass
@@ -89,10 +103,8 @@ def handle_intent(intent_data: dict, phone_number: str):
         tomorrow_events = []
         for e in events:
              try:
-                 deadline = e['deadline']
-                 if isinstance(deadline, str):
-                     deadline = datetime.datetime.fromisoformat(deadline)
-                 if deadline.date() == tomorrow:
+                 deadline = _parse_deadline(e.get('deadline'))
+                 if deadline and deadline.astimezone().date() == tomorrow:
                      tomorrow_events.append(e)
              except Exception:
                  pass
@@ -114,108 +126,100 @@ def handle_intent(intent_data: dict, phone_number: str):
     else:
         response_text = "I'm sorry, I couldn't understand that. Try asking about your next deadline, pending assignments, or what's due today/tomorrow."
         
-    logger.info(f"Replying to {phone_number} with intent result.")
-    send_message(phone_number, response_text)
+    logger.info(f"Replying to chat {chat_id} with intent result.")
+    send_message(chat_id, response_text)
 
-@app.route('/webhook', methods=['GET'])
-def verify_webhook():
-    """Handles webhook verification challenges from Meta API."""
-    mode = request.args.get("hub.mode")
-    token = request.args.get("hub.verify_token")
-    challenge = request.args.get("hub.challenge")
+@app.route('/telegram/webhook', methods=['GET'])
+@app.route('/telegram/webhook/<secret>', methods=['GET'])
+def telegram_webhook_health(secret=None):
+    if TELEGRAM_WEBHOOK_SECRET and secret != TELEGRAM_WEBHOOK_SECRET:
+        return "Forbidden", 403
+    return jsonify({"status": "ok"}), 200
 
-    # Usually one validates hub.verify_token matches your preset config
-    if mode and challenge:
-        if mode == "subscribe":
-            return challenge, 200
-            
-    return "Forbidden", 403
+@app.route('/telegram/webhook', methods=['POST'])
+@app.route('/telegram/webhook/<secret>', methods=['POST'])
+def webhook_handler(secret=None):
+    """Handles Telegram webhook updates for text and document messages."""
+    if TELEGRAM_WEBHOOK_SECRET and secret != TELEGRAM_WEBHOOK_SECRET:
+        return jsonify({"status": "forbidden"}), 403
 
-@app.route('/webhook', methods=['POST'])
-def webhook_handler():
-    """Listens to real-time events posted by WhatsApp / Meta API."""
-    payload = request.get_json()
+    payload = request.get_json(silent=True) or {}
     
     try:
-        # Verify it's coming from WA Cloud Account APIs
-        if "object" in payload and payload["object"] == "whatsapp_business_account":
-            for entry in payload.get("entry", []):
-                for change in entry.get("changes", []):
-                    value = change.get("value", {})
-                    # Is this a new message event?
-                    if "messages" in value:
-                        for message in value["messages"]:
-                            sender_number = message.get("from")
-                            
-                            # Handle documents (ICS files)
-                            if message.get("type") == "document":
-                                doc = message.get("document", {})
-                                filename = doc.get("filename", "")
-                                if filename.lower().endswith(".ics"):
-                                    media_id = doc.get("id")
-                                    logger.info(f"Received ICS document {filename} from {sender_number}.")
-                                    
-                                    media_url = get_media_url(media_id)
-                                    if media_url:
-                                        content = download_media_content(media_url)
-                                        if content:
-                                            # Parse and store
-                                            ics_text = content.decode('utf-8')
-                                            events = process_ics_data(ics_text)
-                                            for event in events:
-                                                database.insert_event(
-                                                    event['event_id'],
-                                                    event['title'],
-                                                    event['deadline'],
-                                                    event['event_type']
-                                                )
-                                            
-                                            # Get summary data for the message
-                                            total_events = len(events)
-                                            next_event = database.get_next_deadline()
-                                            next_reminder_str = "None"
-                                            if next_event:
-                                                try:
-                                                    dt = next_event['deadline']
-                                                    if isinstance(dt, str):
-                                                        dt = datetime.datetime.fromisoformat(dt)
-                                                    next_reminder_str = f"{next_event['title']} ({dt.strftime('%A, %I:%M %p')})"
-                                                except:
-                                                    next_reminder_str = next_event.get('title', 'Unknown')
-                                            
-                                            gemini_quote = generate_quote()
-                                            
-                                            sync_msg = (
-                                                "⚙️ *System Update: Calendar Synced*\n\n"
-                                                f"Your new calendar file has been parsed and saved to the database.\n"
-                                                f"• Total events loaded: {total_events}\n"
-                                                f"• Next scheduled reminder: {next_reminder_str}\n\n"
-                                                f"_{gemini_quote}_"
-                                            )
-                                            
-                                            send_message(sender_number, sync_msg)
-                                        else:
-                                            send_message(sender_number, "Failed to download the calendar file.")
-                                    else:
-                                        send_message(sender_number, "Failed to retrieve the calendar file link.")
-                                else:
-                                    send_message(sender_number, "Please send a valid .ics calendar file.")
+        message = payload.get("message") or payload.get("edited_message")
+        if not message:
+            return jsonify({"status": "ok"}), 200
 
-                            # Only parse explicit standard texts
-                            elif message.get("type") == "text":
-                                text = message.get("text", {}).get("body", "")
-                                logger.info(f"Received user message from {sender_number}.")
-                                
-                                # Gemini evaluates meaning
-                                intent_data = detect_intent(text)
-                                
-                                # Backend formulates reply and sends directly
-                                handle_intent(intent_data, sender_number)
+        chat_id = message.get("chat", {}).get("id")
+        if not _can_process_chat(chat_id):
+            logger.info(f"Ignoring message from non-target chat {chat_id}.")
+            return jsonify({"status": "ok"}), 200
+
+        # Handle documents (ICS files)
+        if "document" in message:
+            doc = message.get("document", {})
+            filename = doc.get("file_name", "")
+            if filename.lower().endswith(".ics"):
+                file_id = doc.get("file_id")
+                logger.info(f"Received ICS document {filename} from chat {chat_id}.")
+
+                file_path = get_file_path(file_id)
+                if file_path:
+                    content = download_file_content(file_path)
+                    if content:
+                        try:
+                            ics_text = content.decode('utf-8')
+                        except UnicodeDecodeError:
+                            ics_text = content.decode('latin-1', errors='replace')
+
+                        events = process_ics_data(ics_text)
+                        for event in events:
+                            database.insert_event(
+                                event['event_id'],
+                                event['title'],
+                                event['deadline'],
+                                event['event_type']
+                            )
+
+                        total_events = len(events)
+                        next_event = database.get_next_deadline()
+                        next_reminder_str = "None"
+                        if next_event:
+                            try:
+                                dt = _parse_deadline(next_event['deadline'])
+                                if dt:
+                                    next_reminder_str = f"{next_event['title']} ({dt.astimezone().strftime('%A, %I:%M %p %Z')})"
+                            except Exception:
+                                next_reminder_str = next_event.get('title', 'Unknown')
+
+                        gemini_quote = generate_quote()
+
+                        sync_msg = (
+                            "System Update: Calendar Synced\n\n"
+                            "Your new calendar file has been parsed and saved to the database.\n"
+                            f"Total events loaded: {total_events}\n"
+                            f"Next scheduled reminder: {next_reminder_str}\n\n"
+                            f"_{gemini_quote}_"
+                        )
+
+                        send_message(str(chat_id), sync_msg)
+                    else:
+                        send_message(str(chat_id), "Failed to download the calendar file.")
+                else:
+                    send_message(str(chat_id), "Failed to retrieve the calendar file path.")
+            else:
+                send_message(str(chat_id), "Please send a valid .ics calendar file.")
+
+        elif "text" in message:
+            text = message.get("text", "")
+            logger.info(f"Received user message from chat {chat_id}.")
+            intent_data = detect_intent(text)
+            handle_intent(intent_data, str(chat_id))
                                 
         return jsonify({"status": "ok"}), 200
         
     except Exception as e:
-        logger.error(f"Error handling webhook payload stream: {e}")
+        logger.exception(f"Error handling webhook payload stream: {e}")
         return jsonify({"status": "error"}), 500
 
 def start_server(port=None):

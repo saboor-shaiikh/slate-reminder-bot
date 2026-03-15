@@ -4,6 +4,38 @@ from google import genai
 from bot_config import GEMINI_API_KEY
 
 logger = logging.getLogger(__name__)
+VALID_INTENTS = {
+    "next_deadline",
+    "pending_assignments",
+    "due_today",
+    "due_tomorrow",
+    "all_deadlines",
+    "unknown",
+}
+
+
+def _rule_based_intent(message_text: str) -> dict:
+    text = (message_text or "").strip().lower()
+
+    if any(token in text for token in ["tomorrow", "due tomorrow"]):
+        return {"intent": "due_tomorrow"}
+    if any(token in text for token in ["today", "due today"]):
+        return {"intent": "due_today"}
+    if any(token in text for token in ["assignment", "assignments", "pending"]):
+        return {"intent": "pending_assignments"}
+    if any(token in text for token in ["all", "everything", "list", "deadlines"]):
+        return {"intent": "all_deadlines"}
+    if any(token in text for token in ["next", "closest", "soonest"]):
+        return {"intent": "next_deadline"}
+
+    return {"intent": "unknown"}
+
+
+def _normalize_intent_payload(payload: dict, original_message: str) -> dict:
+    intent = payload.get("intent") if isinstance(payload, dict) else None
+    if intent in VALID_INTENTS:
+        return {"intent": intent}
+    return _rule_based_intent(original_message)
 
 def detect_intent(message_text: str) -> dict:
     """
@@ -12,7 +44,7 @@ def detect_intent(message_text: str) -> dict:
     """
     if not GEMINI_API_KEY:
         logger.error("GEMINI_API_KEY not configured.")
-        return {"intent": "unknown"}
+        return _rule_based_intent(message_text)
         
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
@@ -51,12 +83,15 @@ def detect_intent(message_text: str) -> dict:
             response_text = response_text[:-3].strip()
             
         data = json.loads(response_text)
-        logger.info(f"Intent detected for message: {message_text} -> {data.get('intent')}")
-        return data
+        normalized = _normalize_intent_payload(data, message_text)
+        logger.info(f"Intent detected for message: {message_text} -> {normalized.get('intent')}")
+        return normalized
         
     except Exception as e:
         logger.error(f"Failed to detect intent properly: {e}")
-        return {"intent": "error"}
+        return _rule_based_intent(message_text)
+
+
 def generate_quote() -> str:
     """
     Generates a unique, hardcore, gangster-style motivational quote using Gemini.

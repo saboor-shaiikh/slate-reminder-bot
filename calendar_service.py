@@ -1,5 +1,6 @@
 from ics import Calendar
 import logging
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,8 @@ def process_ics_data(raw_text: str):
     events = []
 
     for event in c.events:
-        event_id = event.uid or str(hash(event.name + str(event.begin)))
+        fallback_key = f"{event.name}|{event.begin}|{event.end}|{event.description}"
+        event_id = event.uid or hashlib.sha256(fallback_key.encode('utf-8')).hexdigest()
         title = event.name or "Untitled Event"
         description = event.description or ""
 
@@ -34,7 +36,7 @@ def process_ics_data(raw_text: str):
         # Basic keyword check to demarcate quiz format vs normal assignment format
         event_type = "assignment"
         title_lower = title.lower()
-        if "quiz" in title_lower or "test" in title_lower or "exam" in title_lower:
+        if any(word in title_lower for word in ["quiz", "test", "exam", "midterm", "final"]):
             event_type = "quiz"
 
         events.append({

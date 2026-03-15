@@ -16,7 +16,7 @@ def main():
     Kicks off startup procedures sequentially.
     Init DB -> Launch Timers/Crons -> Surface the Webhook layer.
     """
-    logger.info("Initializing Slate Reminder Bot platform components...")
+    logger.info("Initializing Slate Reminder Bot (Telegram edition) components...")
     
     # 1. Initialize DB / Setup table states properly
     database.initialize_database()
@@ -26,9 +26,9 @@ def main():
     start_scheduler()
     logger.info("Reminders orchestration routing online.")
     
-    # 3. Mount REST Server for webhook event listeners
+    # 3. Mount REST server for Telegram webhook updates
     port = int(os.environ.get("PORT", 5000))
-    logger.info(f"Starting Flask application core webhook server on port {port}...")
+    logger.info(f"Starting Flask Telegram webhook server on port {port}...")
     start_server(port=port)
 
 if __name__ == "__main__":
