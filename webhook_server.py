@@ -34,6 +34,11 @@ def _can_process_chat(chat_id) -> bool:
         return True
     return str(chat_id) == str(TARGET_CHAT_ID)
 
+
+def _with_quote(message_text: str) -> str:
+    quote = generate_quote()
+    return f"{message_text}\n\nQuote: {quote}"
+
 def format_event(event):
     """Helps format individual event payloads into a readable, natural structure."""
     deadline = _parse_deadline(event.get('deadline'))
@@ -130,7 +135,7 @@ def handle_intent(intent_data: dict, chat_id: str):
         response_text = "I'm sorry, I couldn't understand that. Try asking about your next deadline, pending assignments, or what's due today/tomorrow."
         
     logger.info(f"Replying to chat {chat_id} with intent result.")
-    send_message(chat_id, response_text)
+    send_message(chat_id, _with_quote(response_text))
 
 @app.route('/telegram/webhook', methods=['GET'])
 @app.route('/telegram/webhook/<secret>', methods=['GET'])
@@ -199,23 +204,20 @@ def webhook_handler(secret=None):
                             except Exception:
                                 next_reminder_str = next_event.get('title', 'Unknown')
 
-                        gemini_quote = generate_quote()
-
                         sync_msg = (
                             "System Update: Calendar Synced\n\n"
                             "Your new calendar file has been parsed and saved to the database.\n"
                             f"Total events loaded: {total_events}\n"
-                            f"Next scheduled reminder: {next_reminder_str}\n\n"
-                            f"_{gemini_quote}_"
+                            f"Next scheduled reminder: {next_reminder_str}"
                         )
 
-                        send_message(str(chat_id), sync_msg)
+                        send_message(str(chat_id), _with_quote(sync_msg))
                     else:
-                        send_message(str(chat_id), "Failed to download the calendar file.")
+                        send_message(str(chat_id), _with_quote("Failed to download the calendar file."))
                 else:
-                    send_message(str(chat_id), "Failed to retrieve the calendar file path.")
+                    send_message(str(chat_id), _with_quote("Failed to retrieve the calendar file path."))
             else:
-                send_message(str(chat_id), "Please send a valid .ics calendar file.")
+                send_message(str(chat_id), _with_quote("Please send a valid .ics calendar file."))
 
         elif "text" in message:
             text = message.get("text", "")

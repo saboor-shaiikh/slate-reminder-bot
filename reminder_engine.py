@@ -23,6 +23,11 @@ def _to_utc_datetime(value):
     return value.astimezone(UTC)
 
 
+def _with_quote(message_text: str) -> str:
+    quote = generate_quote()
+    return f"{message_text}\n\nQuote: {quote}"
+
+
 def send_daily_quote():
     """Sends a daily motivational quote via Telegram."""
     if not TARGET_CHAT_ID:
@@ -80,7 +85,7 @@ def check_reminders():
         # Send reminder if applicable and mutate DB status safely
         if reminder_text and notification_type:
             logger.info(f"[{event['title']}] matches {notification_type} timeline. Emitting...")
-            success = send_message(TARGET_CHAT_ID, reminder_text)
+            success = send_message(TARGET_CHAT_ID, _with_quote(reminder_text))
             if success:
                 database.mark_notification_sent(event['id'], notification_type)
                 logger.info(f"Marked reminder sent ({notification_type}) internally for event {event['id']}.")
